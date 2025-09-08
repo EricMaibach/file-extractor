@@ -1,0 +1,9 @@
+name: test
+version: 1.0.0
+description: Test YAML file
+items:
+  - item1
+  - item2
+  - item3
+nested:
+  key: value

@@ -1,6 +1,7 @@
 package file_extractor
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/dslipak/pdf"
 )
 
 // ExtractText extracts text content from a file if possible
@@ -16,6 +19,11 @@ import (
 // - text: the extracted text content (empty if success is false)
 // - error: any error that occurred during processing
 func ExtractText(filePath string) (bool, string, error) {
+	// Check if it's a PDF file
+	if strings.ToLower(filepath.Ext(filePath)) == ".pdf" {
+		return extractPDFText(filePath)
+	}
+
 	// Check if file is a supported text type
 	isText, _, err := isTextFile(filePath)
 	if err != nil {
@@ -203,4 +211,64 @@ func isLikelyTextContent(data []byte) bool {
 	
 	printableRatio := float64(printableCount) / float64(totalChars)
 	return printableRatio > 0.85
+}
+
+// extractPDFText extracts text content from a PDF file
+func extractPDFText(filePath string) (bool, string, error) {
+	// Open the PDF file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to open PDF file: %v", err)
+	}
+	defer file.Close()
+
+	// Get file info for size
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return false, "", fmt.Errorf("failed to get PDF file info: %v", err)
+	}
+
+	// Read the PDF
+	reader, err := pdf.NewReader(file, fileInfo.Size())
+	if err != nil {
+		// If we can't read the PDF, treat it as a binary file (not text-extractable)
+		return false, "", nil
+	}
+
+	// Extract text from all pages
+	var textBuffer bytes.Buffer
+	numPages := reader.NumPage()
+	
+	// Limit pages to prevent hanging on large PDFs
+	maxPages := 100
+	if numPages > maxPages {
+		numPages = maxPages
+	}
+	
+	for i := 1; i <= numPages; i++ {
+		page := reader.Page(i)
+		if page.V.IsNull() {
+			continue
+		}
+		
+		text, err := page.GetPlainText(nil)
+		if err != nil {
+			// Skip pages that can't be read
+			continue
+		}
+		
+		textBuffer.WriteString(text)
+		if i < numPages {
+			textBuffer.WriteString("\n")
+		}
+	}
+
+	extractedText := textBuffer.String()
+	
+	// If no text was extracted, return false
+	if len(strings.TrimSpace(extractedText)) == 0 {
+		return false, "", nil
+	}
+
+	return true, extractedText, nil
 }
